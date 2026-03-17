@@ -137,6 +137,7 @@ always_ff@(posedge clk1m or negedge rst)begin
     end
 end
 
+`ifndef VERILATOR
 SMI_ct ct(
     .clk(clk1m), .rst(rphyrst), .rw(SMI_rw), .trg(SMI_trg), .ready(SMI_ready), .ack(SMI_ack),
     .phy_adr(5'd1), .reg_adr(SMI_adr),
@@ -144,6 +145,12 @@ SMI_ct ct(
     .smi_data(SMI_data),
     .mdio(netrmii.mdio)
 );
+`else
+// Simulator build path: tie off SMI handshake and report link-up bit set.
+assign SMI_ack = 1'b1;
+assign SMI_ready = 1'b1;
+assign SMI_data = 16'h0004;
+`endif
 
 assign phyrst = rphyrst;
 

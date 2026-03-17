@@ -1,0 +1,28 @@
+# Gowin project outputs
+udp_18k/impl/pnr/
+udp_18k/impl/gwsynthesis/
+udp_18k/impl/place/
+udp_18k/impl/route/
+udp_18k/impl/bitstream/
+udp_18k/impl/*.log
+udp_18k/impl/*.log.bak
+udp_18k/*.gprj.user
+
+# Simulation build artifacts
+simulation/obj_dir/
+simulation/build/
+simulation/*.vcd
+simulation/*.fst
+simulation/sim_main
+
+# Compiler / OS
+*.o
+*.d
+*.a
+*.so
+*.out
+*.swp
+*~
+.DS_Store
+__pycache__/
+*.pyc
