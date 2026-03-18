@@ -20,6 +20,9 @@
 //----------------------------------------------------------------------
 // Creation Date   : 06.05.2023
 //----------------------------------------------------------------------
+// Use ICMP(Echo Ping)    : 03.17.2026
+// Author note            : iSP isp7032@gmail.com
+//----------------------------------------------------------------------
 //
 
 `include "rmii.svh"
@@ -321,6 +324,12 @@ endtask
 
 logic rx_fin;
 
+logic [7:0] ip_proto;
+
+logic [15:0] icmp_checksum;
+logic [15:0] icmp_id;
+logic [15:0] icmp_seq;
+
 
 
 always_ff@(posedge clk50m or negedge phy_rdy)begin
@@ -333,6 +342,10 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
         rx_data_fifo_head_int <= 0;
 
         arp_list <= 2'b00;
+        ip_proto <= 8'h11;
+        icmp_checksum <= 16'h0000;
+        icmp_id <= 16'h0000;
+        icmp_seq <= 16'h0000;
     end else begin
         if(arp_list[0]==1'b1)begin
             if(arp_life_time[0] != 0)
@@ -416,10 +429,9 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                     idf <= rx_info_buf[15:0];
                 end
                 if(rx_data_byte_cnt == 26)begin
-                    if(rx_info_buf[23:16] != 8'h11)
+                    ip_proto <= rx_info_buf[23:16];
+                    if((rx_info_buf[23:16] != 8'h11) && (rx_info_buf[23:16] != 8'h01))
                         ethernet_resolve_status <= 100;
-                    
-                    //checksum <= rx_info_buf[15:0];
                 end
 
                 if(rx_data_byte_cnt == 30)begin
@@ -427,8 +439,6 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                 end
 
                 if(rx_data_byte_cnt == head_len + 14)begin
-                    ethernet_resolve_status <= 21;
-
                     if(rx_data_byte_cnt != 34)
                         checksum <= src_ip[15:0]+src_ip[31:16]+dst_ip[15:0]+dst_ip[31:16]+16'h0011;
                     else
@@ -445,6 +455,8 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                     if((checksum[17:0]+{2'd0,rx_info_buf[15:0]} != 18'h0FFFF) && (checksum[17:0]+{2'd0,rx_info_buf[15:0]} != 18'h1FFFE) && (checksum[17:0]+{2'd0,rx_info_buf[15:0]} != 18'h2FFFD))
                     //if((checksum[16:0]+{1'b0,rx_info_buf[15:0]} != 17'h00000) && (checksum[16:0]+{1'b0,rx_info_buf[15:0]} != 17'h1FFFF))
                         ethernet_resolve_status <= 100;
+                    else
+                        ethernet_resolve_status <= 21;
                 end
             end
             21:begin
@@ -454,44 +466,48 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                 if(rx_data_byte_cnt == head_len + 19)begin
                     rx_head_fifo_push(dst_ip);
                 end
-                if(rx_data_byte_cnt == head_len + 21)begin
-                    rx_head_fifo_push({src_port,dst_port});
-                end
-                if(rx_data_byte_cnt == head_len + 22)begin
-                    rx_head_fifo_push({idf,udp_len - 8});
-                end
+                if(ip_proto == 8'h11)begin
+                    if(rx_data_byte_cnt == head_len + 20)begin
+                        src_port <= rx_info_buf[47:32];
+                        dst_port <= rx_info_buf[31:16];
+                        udp_len <= rx_info_buf[15:0];
+                    end
+                    if(rx_data_byte_cnt == head_len + 21)begin
+                        rx_head_fifo_push({src_port,dst_port});
+                    end
+                    if(rx_data_byte_cnt == head_len + 22)begin
+                        rx_head_fifo_push({idf,udp_len - 8});
+                    end
 
-                if(rx_data_byte_cnt == head_len + 20)begin
-                    src_port <= rx_info_buf[47:32];
-                    dst_port <= rx_info_buf[31:16];
-                    udp_len <= rx_info_buf[15:0];
-                end
+                    if(rx_data_byte_cnt > head_len + 22 && udp_len != 8)begin
+                        rx_data_fifo_push(rx_info_buf[7:0]);
+                    end
 
-                if(rx_data_byte_cnt > head_len + 22 && udp_len != 8)begin
-                    rx_data_fifo_push(rx_info_buf[7:0]);
-                end
-
-                if(rx_data_byte_cnt == head_len + 14 + udp_len)begin
-                    if(rx_data_byte_cnt[0]==1'b1)begin
-                        if((checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h2FFFD))
-                            ethernet_resolve_status <= 100;
-                        else begin
-                            ethernet_resolve_status <= 29;
-                            //移动头部指针
-                            rx_head_fifo_head <= rx_head_fifo_head_int;
-                            if(udp_len != 8)
-                                rx_data_fifo_head <= rx_data_fifo_head_int == 8191?16'd0:rx_data_fifo_head_int+16'd1;
+                    if(rx_data_byte_cnt == head_len + 14 + udp_len)begin
+                        ethernet_resolve_status <= 29;
+                        if(rx_data_byte_cnt[0]==1'b1)begin
+                            if((checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h2FFFD))
+                                ethernet_resolve_status <= 100;
+                        end else begin
+                            if((checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h2FFFD))
+                                ethernet_resolve_status <= 100;
                         end
-                    end else begin
-                        if((checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h2FFFD))
-                            ethernet_resolve_status <= 100;
-                        else begin
-                            ethernet_resolve_status <= 29;
-                            //移动头部指针
-                            rx_head_fifo_head <= rx_head_fifo_head_int;
-                            if(udp_len != 8)
-                                rx_data_fifo_head <= rx_data_fifo_head_int == 8191?16'd0:rx_data_fifo_head_int+16'd1;
-                        end
+
+                        rx_head_fifo_head <= rx_head_fifo_head_int;
+                        if(udp_len != 8)
+                            rx_data_fifo_head <= rx_data_fifo_head_int == 8191?16'd0:rx_data_fifo_head_int+16'd1;
+                    end
+                end else if(ip_proto == 8'h01)begin
+                    if(rx_data_byte_cnt == head_len + 20)begin
+                        icmp_checksum <= rx_info_buf[31:16];
+                        icmp_id <= rx_info_buf[15:0];
+                        rx_head_fifo_push(32'h0000_0000);
+                    end
+                    if(rx_data_byte_cnt == head_len + 22)begin
+                        icmp_seq <= rx_info_buf[15:0];
+                        rx_head_fifo_push({idf,16'd0});
+                        ethernet_resolve_status <= 29;
+                        rx_head_fifo_head <= rx_head_fifo_head_int;
                     end
                 end
 
@@ -983,11 +999,20 @@ shortint data_cnt;
 udp_generator #(.ip_adr(ip_adr)) udp_gen (
     .clk(clk50m),.rst(phy_rdy),
     .data(tx_data_i),
+
+    .ip_proto_i(ip_proto),
+
     .tx_en(tx_data_av_i),
     .req(tx_req_i),
-    .ip_adr_i(tx_ip_i),
+    .ip_adr_i(ip_proto == 8'h01 ? src_ip : tx_ip_i),
     .src_port(tx_src_port_i),
     .dst_port(tx_dst_port_i),
+
+    .icmp_type_i(8'h08),
+    .icmp_code_i(8'h00),
+    .icmp_checksum_i(icmp_checksum),
+    .icmp_id_i(icmp_id),
+    .icmp_seq_i(icmp_seq),
 
     .head_o(ob_head_o),
     .data_o(ob_data_o),
@@ -1435,11 +1460,18 @@ endmodule
 module udp_generator #(parameter bit [31:0] ip_adr = 32'd0)(
     input clk, rst,
     input [7:0] data,
+    input [7:0] ip_proto_i,
     input tx_en,
     input req,
     input [31:0] ip_adr_i,
     input [15:0] src_port,
     input [15:0] dst_port,
+
+    input [7:0] icmp_type_i,
+    input [7:0] icmp_code_i,
+    input [15:0] icmp_checksum_i,
+    input [15:0] icmp_id_i,
+    input [15:0] icmp_seq_i,
 
     output logic [31:0] head_o,
     output logic [7:0] data_o,
@@ -1468,6 +1500,7 @@ logic [17:0] checksum;
 logic [17:0] head_checksum;
 logic [15:0] send_checksum;
 logic [15:0] send_head_checksum;
+logic [15:0] icmp_cksun_out;
 
 
 logic [7:0] lst_in;
@@ -1486,10 +1519,10 @@ always_comb begin
     head_len <= 16'd28 + sendlen[15:0];
     udp_len <= 16'd8 + sendlen[15:0];
     send_checksum <= 16'hFFEF - checksum[15:0];
+    icmp_cksun_out <= icmp_checksum_i + 16'h0800;
     if(checksum[15:0]>16'hFFEF)begin
         send_checksum <= 16'hFFEF - 16'd1 - checksum[15:0];
     end
-    send_head_checksum <= 16'h0000 - head_checksum[15:0];
 end
 
 logic [7:0] udp_head_p1 [3:0] = {8'h08, 8'h00, 8'h45, 8'h00};
@@ -1508,6 +1541,7 @@ always@(posedge clk or negedge rst)begin
 
         checksum <= 18'h00000;
         head_checksum <= 18'h00000;
+        send_head_checksum <= 16'h0000;
         sendlen <= 0;
 
         full <= 0;
@@ -1549,12 +1583,16 @@ always@(posedge clk or negedge rst)begin
                     pack_num <= pack_num + 16'd1;
 
                     head_checksum <= 18'h0C512;
+                    send_head_checksum <= 16'h0000;
                 end
             end
             1:begin 
                 //length *2 + protocol + src_ip + dst_ip  + src_port + dst_port
                 if(udp_gen_cnt == 0)begin
-                    checksum <= {2'b0,checksum[15:0]} + {16'd0,checksum[17:16]} + {2'b00,sendlen} + {2'b00,sendlen} + 18'h11;
+                    if(ip_proto_i == 8'h01)
+                        checksum <= {2'b0,checksum[15:0]} + {16'd0,checksum[17:16]} + 18'h0019;
+                    else
+                        checksum <= {2'b0,checksum[15:0]} + {16'd0,checksum[17:16]} + {2'b00,sendlen} + {2'b00,sendlen} + 18'h11;
                 end
                 if(udp_gen_cnt == 1)begin
                     checksum <= {2'b0,checksum[15:0]} + {16'd0,checksum[17:16]} + {2'b00,ip_adr[31:16]} + {2'b00,ip_adr[15:0]};
@@ -1563,7 +1601,10 @@ always@(posedge clk or negedge rst)begin
                     checksum <= {2'b0,checksum[15:0]} + {16'd0,checksum[17:16]} + {2'b00,local_ip[31:16]} + {2'b00,local_ip[15:0]};
                 end
                 if(udp_gen_cnt == 3)begin
-                    checksum <= 18'({2'b0,checksum[15:0]} + {16'd0,checksum[17:16]} + {2'b00,local_src_port} + {2'b00,local_dst_port});
+                    if(ip_proto_i == 8'h01)
+                        checksum <= 18'({2'b0,checksum[15:0]} + {16'd0,checksum[17:16]});
+                    else
+                        checksum <= 18'({2'b0,checksum[15:0]} + {16'd0,checksum[17:16]} + {2'b00,local_src_port} + {2'b00,local_dst_port});
                 end
                 if(udp_gen_cnt == 4)begin
                     if(sendlen[0] == 1'b1)begin
@@ -1597,6 +1638,11 @@ always@(posedge clk or negedge rst)begin
                     head_checksum <= {2'b0,head_checksum[15:0]} + {16'd0,head_checksum[17:16]};
                 if(udp_gen_cnt == 7)
                     head_checksum <= {2'b0,head_checksum[15:0]} + {16'd0,head_checksum[17:16]};
+
+                if((udp_gen_cnt == 7) && (ip_proto_i == 8'h11))
+                    send_head_checksum <= ~(head_checksum[15:0] - 16'h0001);
+                if((udp_gen_cnt == 11) && (ip_proto_i == 8'h01))
+                    send_head_checksum <= (~(head_checksum[15:0] - 16'h0001)) + 16'h0010;
                 
                 if(udp_gen_cnt == 0)begin//push ip
                     head_en <= 1'b1;
@@ -1611,14 +1657,35 @@ always@(posedge clk or negedge rst)begin
                 if(udp_gen_cnt < 4)data_o <= udp_head_p1[3-udp_gen_cnt];
                 if(udp_gen_cnt >= 4 && udp_gen_cnt < 6)data_o <= head_len[(5-udp_gen_cnt)*8 +: 8];
                 if(udp_gen_cnt >= 6 && udp_gen_cnt < 8)data_o <= pack_num[(7-udp_gen_cnt)*8 +: 8];
+
+                udp_head_p2[3] <= 8'h00;
+                udp_head_p2[2] <= 8'h00;
+                udp_head_p2[1] <= 8'h80;
+                udp_head_p2[0] <= ip_proto_i;
+
                 if(udp_gen_cnt >= 8 && udp_gen_cnt < 12)data_o <= udp_head_p2[11-udp_gen_cnt];
                 if(udp_gen_cnt >= 12 && udp_gen_cnt < 14)data_o <= send_head_checksum[(13-udp_gen_cnt)*8 +: 8];
                 if(udp_gen_cnt >= 14 && udp_gen_cnt < 18)data_o <= ip_adr[(17-udp_gen_cnt)*8 +: 8];
                 if(udp_gen_cnt >= 18 && udp_gen_cnt < 22)data_o <= local_ip[(21-udp_gen_cnt)*8 +: 8];
-                if(udp_gen_cnt >= 22 && udp_gen_cnt < 24)data_o <= local_src_port[(23-udp_gen_cnt)*8 +: 8];
-                if(udp_gen_cnt >= 24 && udp_gen_cnt < 26)data_o <= local_dst_port[(25-udp_gen_cnt)*8 +: 8];
-                if(udp_gen_cnt >= 26 && udp_gen_cnt < 28)data_o <= udp_len[(27-udp_gen_cnt)*8 +: 8];
-                if(udp_gen_cnt >= 28 && udp_gen_cnt < 30)data_o <= send_checksum[(29-udp_gen_cnt)*8 +: 8];
+
+                if(ip_proto_i == 8'h01)begin
+                    if(udp_gen_cnt == 22)data_o <= icmp_type_i - 8'h08;
+                    if(udp_gen_cnt == 23)data_o <= icmp_code_i;
+
+                    if(udp_gen_cnt == 24)data_o <= icmp_cksun_out[15:8];
+                    if(udp_gen_cnt == 25)data_o <= icmp_cksun_out[7:0];
+
+                    if(udp_gen_cnt == 26)data_o <= icmp_id_i[15:8];
+                    if(udp_gen_cnt == 27)data_o <= icmp_id_i[7:0];
+                    if(udp_gen_cnt == 28)data_o <= icmp_seq_i[15:8];
+                    if(udp_gen_cnt == 29)data_o <= icmp_seq_i[7:0];
+                end else begin
+                    if(udp_gen_cnt >= 22 && udp_gen_cnt < 24)data_o <= local_src_port[(23-udp_gen_cnt)*8 +: 8];
+                    if(udp_gen_cnt >= 24 && udp_gen_cnt < 26)data_o <= local_dst_port[(25-udp_gen_cnt)*8 +: 8];
+                    if(udp_gen_cnt >= 26 && udp_gen_cnt < 28)data_o <= udp_len[(27-udp_gen_cnt)*8 +: 8];
+                    if(udp_gen_cnt >= 28 && udp_gen_cnt < 30)data_o <= send_checksum[(29-udp_gen_cnt)*8 +: 8];
+                end
+
                 if(udp_gen_cnt >= 30)data_o <= buffer_port_o;
 
                 if(udp_gen_cnt >= 28 && udp_gen_cnt < 28+sendlen)begin
@@ -1633,6 +1700,7 @@ always@(posedge clk or negedge rst)begin
             2:begin
                 fin <= 1'b1;
                 udp_gen_status <= 0;
+                udp_gen_cnt <= 16'd0;
 
                 checksum <= 18'h00000;
             end         

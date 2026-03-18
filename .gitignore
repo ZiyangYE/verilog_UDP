@@ -26,3 +26,6 @@ simulation/sim_main
 .DS_Store
 __pycache__/
 *.pyc
+
+# Reference files
+ref/
