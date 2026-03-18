@@ -26,7 +26,7 @@ BASE_SRC_PORT = int(os.environ.get("SIM_SRC_PORT", "12345"))
 _udp_matrix_env = os.environ.get("SIM_UDP_MATRIX", "2,4,8,16,32,64,128")
 UDP_MATRIX = [int(x) for x in _udp_matrix_env.split(",") if x.strip()]
 UDP_STRESS_COUNT = int(os.environ.get("SIM_UDP_STRESS", "40"))
-PING_SIZE = int(os.environ.get("SIM_PING_SIZE", "0"))
+PING_SIZE = int(os.environ.get("SIM_PING_SIZE", "32"))
 STRICT_MODE = os.environ.get("SIM_STRICT", "1") == "1"
 
 

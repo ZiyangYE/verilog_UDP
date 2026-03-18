@@ -278,6 +278,7 @@ logic [15:0] dst_port;
 
 logic [15:0] idf;
 logic [15:0] udp_len;
+logic [15:0] ip_total_len;
 
 shortint rx_head_fifo_head_int;
 shortint rx_head_fifo_head;
@@ -346,6 +347,7 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
         icmp_checksum <= 16'h0000;
         icmp_id <= 16'h0000;
         icmp_seq <= 16'h0000;
+        ip_total_len <= 16'h0000;
     end else begin
         if(arp_list[0]==1'b1)begin
             if(arp_life_time[0] != 0)
@@ -426,6 +428,7 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                         ethernet_resolve_status <= 100;
                     end
                     head_len <= rx_info_buf[43:40]*4;
+                    ip_total_len <= rx_info_buf[31:16];
                     idf <= rx_info_buf[15:0];
                 end
                 if(rx_data_byte_cnt == 26)begin
@@ -505,9 +508,18 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                     end
                     if(rx_data_byte_cnt == head_len + 22)begin
                         icmp_seq <= rx_info_buf[15:0];
+                    end
+
+                    if(rx_data_byte_cnt > head_len + 22 && rx_data_byte_cnt <= 14 + ip_total_len)begin
+                        rx_data_fifo_push(rx_info_buf[7:0]);
+                    end
+
+                    if(rx_data_byte_cnt == 14 + ip_total_len)begin
                         rx_head_fifo_push({idf,16'd0});
                         ethernet_resolve_status <= 29;
                         rx_head_fifo_head <= rx_head_fifo_head_int;
+                        if(ip_total_len != head_len + 8)
+                            rx_data_fifo_head <= rx_data_fifo_head_int == 8191?16'd0:rx_data_fifo_head_int+16'd1;
                     end
                 end
 
