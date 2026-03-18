@@ -9,6 +9,7 @@ The code includes the following functionalities:
 - ARP reception and response, as well as ARP request
 - UDP packet sending and reception
 - Generation and verification of UDP checksum
+- ICMP Echo (Ping) support with payload echo (Contributor: iSP isp7032@gmail.com)
 
 *Note:* The code is suitable for IPv4 only.
 
@@ -95,6 +96,7 @@ LAKKA/JA_P_S
 - ARP 接收和回复，以及 ARP 请求
 - UDP 包的发送和接收
 - UDP 校验和的生成和验证
+- 支持 ICMP Echo (Ping) 请求和 Payload 回显 (贡献者: iSP isp7032@gmail.com)
 
 *注意：* 该代码仅适用于 IPv4。
 
@@ -181,6 +183,7 @@ LAKKA/JA_P_S
 - ARP受信と応答、およびARPリクエスト
 - UDPパケットの送信と受信
 - UDPチェックサムの生成と検証
+- ICMP Echo (Ping) およびペイロード・エコーをサポート (コントリビューター: iSP isp7032@gmail.com)
 
 *注意:* このコードはIPv4専用です。
 
