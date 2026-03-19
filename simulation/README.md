@@ -6,14 +6,14 @@
 
 - Verilator-based simulation for the original `udp_18k/src/udp.sv`
 - RMII <-> Linux TAP bridge for host-side network interaction
-- UDP interaction test script with one-time sudo authorization flow
+- Comprehensive ARP/ICMP/UDP regression script with core and wire-level checks
 - Uses `force` in simulation top to bypass PHY readiness sequencing
 
 ## Files
 
 - `sim_top.sv`: simulation top wrapper instantiating original `udp`
 - `sim_main.cpp`: C++ testbench (TAP bridge + RMII packet injection/collection)
-- `test_interact.py`: automatic interaction test script
+- `test_interact.py`: layered regression script (core checks + extended diagnostics)
 - `Makefile`: build/run targets
 
 ## Build and Run
@@ -24,7 +24,26 @@ make
 python3 test_interact.py
 ```
 
-For non-root users, `test_interact.py` performs `sudo -v` once, then reuses the sudo ticket to start the simulator.
+If privileged TAP operations are required, authorize once manually before running tests:
+
+```bash
+sudo -v
+```
+
+Then run regression normally from `simulation/`.
+
+## Regression Modes
+
+- Core checks: ARP resolution, ICMP basic ping, UDP basic roundtrip
+- Extended checks: ICMP wire-level verification, UDP matrix test, UDP wire header verification, negative behavior check, UDP stress test
+
+Default mode is strict (`SIM_STRICT=1`), which means extended check failures cause non-zero exit.
+
+Useful environment variables:
+
+- `SIM_STRICT` (`1` or `0`)
+- `SIM_UDP_MATRIX` (e.g. `2,4,8,16,32,64,128`)
+- `SIM_UDP_STRESS` (e.g. `40`)
 
 ## Network Defaults
 
@@ -56,14 +75,14 @@ LAKKA/JA_P_S
 
 - 基于 Verilator 的原始 `udp_18k/src/udp.sv` 仿真
 - RMII 与 Linux TAP 虚拟网卡双向桥接
-- 带一次 sudo 授权流程的 UDP 自动交互测试脚本
+- 覆盖 ARP/ICMP/UDP 的分层回归脚本（核心项 + 线级扩展项）
 - 在仿真顶层通过 `force` 绕过 PHY ready 初始化等待
 
 ## 文件
 
 - `sim_top.sv`：仿真顶层封装，直接实例化原始 `udp`
 - `sim_main.cpp`：C++ 测试台（TAP 桥接 + RMII 注入/采集）
-- `test_interact.py`：自动交互测试脚本
+- `test_interact.py`：分层回归脚本（核心门禁 + 扩展诊断）
 - `Makefile`：构建/运行目标
 
 ## 构建与运行
@@ -75,6 +94,19 @@ python3 test_interact.py
 ```
 
 非 root 用户下，`test_interact.py` 会先执行一次 `sudo -v`，随后复用 sudo ticket 启动仿真。
+
+## 回归模式
+
+- 核心项：ARP 解析、ICMP 基础连通、UDP 基础回环
+- 扩展项：ICMP 线级校验、UDP 矩阵测试、UDP 线级头检查、负向行为检查、UDP 压力测试
+
+默认 strict 模式为 `SIM_STRICT=1`，扩展项失败会返回非零。
+
+可选参数：
+
+- `SIM_STRICT`（`1` 或 `0`）
+- `SIM_UDP_MATRIX`（如 `2,4,8,16,32,64,128`）
+- `SIM_UDP_STRESS`（如 `40`）
 
 ## 默认网络参数
 
@@ -106,14 +138,14 @@ LAKKA/JA_P_S
 
 - 元の `udp_18k/src/udp.sv` を Verilator でシミュレーション
 - RMII と Linux TAP 仮想 NIC の双方向ブリッジ
-- sudo 一回認証フロー付き UDP 自動連携テストスクリプト
+- ARP/ICMP/UDP を対象としたレイヤ型回帰スクリプト（コア + 拡張）
 - シミュレーショントップで `force` を使って PHY ready 待機をバイパス
 
 ## ファイル
 
 - `sim_top.sv`: 元の `udp` を直接インスタンスするトップラッパ
 - `sim_main.cpp`: C++ テストベンチ（TAP ブリッジ + RMII 注入/回収）
-- `test_interact.py`: 自動連携テストスクリプト
+- `test_interact.py`: レイヤ型回帰スクリプト（コア判定 + 拡張診断）
 - `Makefile`: ビルド/実行ターゲット
 
 ## ビルドと実行
@@ -125,6 +157,19 @@ python3 test_interact.py
 ```
 
 非 root ユーザーの場合、`test_interact.py` は最初に `sudo -v` を実行し、その後 sudo チケットを再利用してシミュレータを起動します。
+
+## 回帰モード
+
+- コア項目: ARP 解決、ICMP 基本疎通、UDP 基本ラウンドトリップ
+- 拡張項目: ICMP ワイヤ検証、UDP 行列テスト、UDP ヘッダ検証、負系挙動検証、UDP ストレステスト
+
+既定の strict モードは `SIM_STRICT=1` で、拡張項目失敗時は非ゼロ終了になります。
+
+主な環境変数:
+
+- `SIM_STRICT`（`1` または `0`）
+- `SIM_UDP_MATRIX`（例: `2,4,8,16,32,64,128`）
+- `SIM_UDP_STRESS`（例: `40`）
 
 ## 既定ネットワーク設定
 
