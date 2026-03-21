@@ -19,9 +19,10 @@
 // File            : udp.sv
 //----------------------------------------------------------------------
 // Creation Date   : 06.05.2023
-//----------------------------------------------------------------------
-// Use ICMP(Echo Ping)    : 03.17.2026
+//------------------------------ ----------------------------------------
+// Use ICMP(Echo Ping)    : 03.20.2026
 // Author note            : iSP isp7032@gmail.com
+// 03.20.2026 LAKKA, after the update, iSP confirmed.
 //----------------------------------------------------------------------
 //
 
@@ -295,6 +296,7 @@ logic [7:0] rx_head_data_i_adr;
 //3: idf+udp_len
 
 task rx_head_fifo_push(input [31:0] data);
+    rx_head_fifo[rx_head_fifo_head_int[6:0]] <= data;
     rx_head_data_i_port <= data;
     rx_head_data_i_en <= 1'b1;
     rx_head_data_i_adr <= rx_head_fifo_head_int[7:0];
@@ -314,6 +316,7 @@ logic rx_data_fifo_i_en;
 logic [12:0] rx_data_fifo_i_adr;
 
 task rx_data_fifo_push(input [7:0] data);
+    rx_data_fifo[rx_data_fifo_head_int[12:0]] <= data;
     rx_data_fifo_i_port <= data;
     rx_data_fifo_i_en <= 1'b1;
     rx_data_fifo_i_adr <= rx_data_fifo_head_int[12:0];
@@ -1681,16 +1684,10 @@ always@(posedge clk or negedge rst)begin
                 if(udp_gen_cnt >= 18 && udp_gen_cnt < 22)data_o <= local_ip[(21-udp_gen_cnt)*8 +: 8];
 
                 if(ip_proto_i == 8'h01)begin
-                    if(udp_gen_cnt == 22)data_o <= icmp_type_i - 8'h08;
-                    if(udp_gen_cnt == 23)data_o <= icmp_code_i;
-
-                    if(udp_gen_cnt == 24)data_o <= icmp_cksun_out[15:8];
-                    if(udp_gen_cnt == 25)data_o <= icmp_cksun_out[7:0];
-
-                    if(udp_gen_cnt == 26)data_o <= icmp_id_i[15:8];
-                    if(udp_gen_cnt == 27)data_o <= icmp_id_i[7:0];
-                    if(udp_gen_cnt == 28)data_o <= icmp_seq_i[15:8];
-                    if(udp_gen_cnt == 29)data_o <= icmp_seq_i[7:0];
+                    if(udp_gen_cnt >= 22 && udp_gen_cnt <= 23)data_o <= 8'h00;
+                    if(udp_gen_cnt >= 24 && udp_gen_cnt <= 25)data_o <= icmp_cksun_out[(25-udp_gen_cnt)*8 +: 8];
+                    if(udp_gen_cnt >= 26 && udp_gen_cnt <= 27)data_o <= icmp_id_i[(27-udp_gen_cnt)*8 +: 8];
+                    if(udp_gen_cnt >= 28 && udp_gen_cnt <= 29)data_o <= icmp_seq_i[(29-udp_gen_cnt)*8 +: 8];
                 end else begin
                     if(udp_gen_cnt >= 22 && udp_gen_cnt < 24)data_o <= local_src_port[(23-udp_gen_cnt)*8 +: 8];
                     if(udp_gen_cnt >= 24 && udp_gen_cnt < 26)data_o <= local_dst_port[(25-udp_gen_cnt)*8 +: 8];

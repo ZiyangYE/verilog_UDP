@@ -23,7 +23,7 @@ DUT_MAC = os.environ.get("SIM_DUT_MAC", "06:00:aa:bb:0c:dd").lower()
 DUT_PORT = int(os.environ.get("SIM_DUT_PORT", "11451"))
 BASE_SRC_PORT = int(os.environ.get("SIM_SRC_PORT", "12345"))
 
-_udp_matrix_env = os.environ.get("SIM_UDP_MATRIX", "2,4,8,16,32,64,128")
+_udp_matrix_env = os.environ.get("SIM_UDP_MATRIX", "1,2,3,4,5,6,7,8,15,16,17,18,31,32,33,34,63,64,65,66,127,128,129,130")
 UDP_MATRIX = [int(x) for x in _udp_matrix_env.split(",") if x.strip()]
 UDP_STRESS_COUNT = int(os.environ.get("SIM_UDP_STRESS", "40"))
 PING_SIZE = int(os.environ.get("SIM_PING_SIZE", "32"))
@@ -509,29 +509,50 @@ def udp_stress_check() -> CheckResult:
     src_port = BASE_SRC_PORT + 900
     recv_port = src_port + 1
     try:
-        recv.settimeout(1.5)
         recv.bind((HOST_IP, recv_port))
         send.bind((HOST_IP, src_port))
 
-        expected = set()
+        expected = {f"stress-{i:04d}".encode() for i in range(UDP_STRESS_COUNT)}
+        got = set()
+        unexpected = []
+
+        # Interleave tx/rx with short recv timeout to keep throughput high.
+        recv.settimeout(0.02)
         for i in range(UDP_STRESS_COUNT):
             msg = f"stress-{i:04d}".encode()
-            expected.add(msg)
             send.sendto(msg, (DUT_IP, DUT_PORT))
-            time.sleep(0.003)
 
-        got = set()
-        deadline = time.time() + 3.5
+            for _ in range(2):
+                try:
+                    data, _ = recv.recvfrom(2048)
+                    if data in expected:
+                        got.add(data)
+                    elif len(unexpected) < 3:
+                        unexpected.append(data.hex())
+                except socket.timeout:
+                    break
+
+            time.sleep(0.001)
+
+        # Drain remaining echoes with a longer timeout.
+        recv.settimeout(0.5)
+        deadline = time.time() + max(3.0, UDP_STRESS_COUNT * 0.01)
         while time.time() < deadline and len(got) < len(expected):
             try:
                 data, _ = recv.recvfrom(2048)
                 if data in expected:
                     got.add(data)
+                elif len(unexpected) < 3:
+                    unexpected.append(data.hex())
             except socket.timeout:
-                break
+                continue
 
         if got != expected:
-            return CheckResult("udp.stress", False, f"received {len(got)}/{len(expected)}")
+            missing = len(expected) - len(got)
+            detail = f"received {len(got)}/{len(expected)} missing={missing}"
+            if unexpected:
+                detail += f" unexpected_samples={unexpected}"
+            return CheckResult("udp.stress", False, detail)
         return CheckResult("udp.stress", True, f"received {len(got)}/{len(expected)}")
     finally:
         recv.close()

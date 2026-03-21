@@ -33,6 +33,7 @@ module sim_top (
     logic rx_head_av;
     logic [31:0] rx_head;
     logic rx_data_av;
+    logic rx_data_rdy;
     logic [7:0] rx_data;
     logic rx_head_rdy;
 
@@ -61,7 +62,7 @@ module sim_top (
         .rx_head_rdy_i(rx_head_rdy),
         .rx_head_av_o(rx_head_av),
         .rx_head_o(rx_head),
-        .rx_data_rdy_i(1'b1),
+        .rx_data_rdy_i(rx_data_rdy),
         .rx_data_av_o(rx_data_av),
         .rx_data_o(rx_data),
         .tx_ip_i(tx_ip),
@@ -81,8 +82,9 @@ module sim_top (
     end
 
     always_comb begin
+        rx_data_rdy <= tx_data_rdy;
         tx_data <= rx_data;
-        tx_data_av <= rx_data_av;
+        tx_data_av <= rx_data_av && tx_data_rdy;
     end
 
     byte tx_state;
