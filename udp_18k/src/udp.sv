@@ -296,7 +296,6 @@ logic [7:0] rx_head_data_i_adr;
 //3: idf+udp_len
 
 task rx_head_fifo_push(input [31:0] data);
-    rx_head_fifo[rx_head_fifo_head_int[6:0]] <= data;
     rx_head_data_i_port <= data;
     rx_head_data_i_en <= 1'b1;
     rx_head_data_i_adr <= rx_head_fifo_head_int[7:0];
@@ -316,7 +315,6 @@ logic rx_data_fifo_i_en;
 logic [12:0] rx_data_fifo_i_adr;
 
 task rx_data_fifo_push(input [7:0] data);
-    rx_data_fifo[rx_data_fifo_head_int[12:0]] <= data;
     rx_data_fifo_i_port <= data;
     rx_data_fifo_i_en <= 1'b1;
     rx_data_fifo_i_adr <= rx_data_fifo_head_int[12:0];
@@ -327,6 +325,7 @@ task rx_data_fifo_push(input [7:0] data);
 endtask
 
 logic rx_fin;
+logic rx_commit_pending;
 
 logic [7:0] ip_proto;
 
@@ -351,6 +350,7 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
         icmp_id <= 16'h0000;
         icmp_seq <= 16'h0000;
         ip_total_len <= 16'h0000;
+        rx_commit_pending <= 1'b0;
     end else begin
         if(arp_list[0]==1'b1)begin
             if(arp_life_time[0] != 0)
@@ -377,7 +377,6 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
         if(rx_data_fifo_i_en)
             rx_data_fifo[rx_data_fifo_i_adr] <= rx_data_fifo_i_port;
         rx_data_fifo_i_en <= 1'b0;
-        
 
         rx_fin <= rx_data_fin;
 
@@ -491,17 +490,18 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
 
                     if(rx_data_byte_cnt == head_len + 14 + udp_len)begin
                         ethernet_resolve_status <= 29;
+                        rx_commit_pending <= 1'b1;
                         if(rx_data_byte_cnt[0]==1'b1)begin
-                            if((checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h2FFFD))
+                            if((checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[7:0],8'd0}+udp_len != 18'h2FFFD)) begin
                                 ethernet_resolve_status <= 100;
+                                rx_commit_pending <= 1'b0;
+                            end
                         end else begin
-                            if((checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h2FFFD))
+                            if((checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h0FFFF)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h1FFFE)&&(checksum[17:0]+{2'd0,rx_info_buf[15:0]}+udp_len != 18'h2FFFD)) begin
                                 ethernet_resolve_status <= 100;
+                                rx_commit_pending <= 1'b0;
+                            end
                         end
-
-                        rx_head_fifo_head <= rx_head_fifo_head_int;
-                        if(udp_len != 8)
-                            rx_data_fifo_head <= rx_data_fifo_head_int == 8191?16'd0:rx_data_fifo_head_int+16'd1;
                     end
                 end else if(ip_proto == 8'h01)begin
                     if(rx_data_byte_cnt == head_len + 20)begin
@@ -520,9 +520,7 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                     if(rx_data_byte_cnt == 14 + ip_total_len)begin
                         rx_head_fifo_push({idf,16'd0});
                         ethernet_resolve_status <= 29;
-                        rx_head_fifo_head <= rx_head_fifo_head_int;
-                        if(ip_total_len != head_len + 8)
-                            rx_data_fifo_head <= rx_data_fifo_head_int == 8191?16'd0:rx_data_fifo_head_int+16'd1;
+                        rx_commit_pending <= 1'b1;
                     end
                 end
 
@@ -591,6 +589,19 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
 
         if(rx_fin)
             ethernet_resolve_status <= 0;
+
+        //delayed head commit: fires 1 cycle after termination so _i_en write completes first
+        if(rx_commit_pending) begin
+            rx_head_fifo_head <= rx_head_fifo_head_int;
+            if(ip_proto == 8'h11) begin
+                if(udp_len != 8)
+                    rx_data_fifo_head <= rx_data_fifo_head_int;
+            end else if(ip_proto == 8'h01) begin
+                if(ip_total_len != head_len + 8)
+                    rx_data_fifo_head <= rx_data_fifo_head_int;
+            end
+            rx_commit_pending <= 1'b0;
+        end
     end
 end
 
