@@ -42,7 +42,7 @@ Note: this Verilator + TAP simulation flow is Linux-only.
 
 - Build: `cd simulation && make`
 - Manually authorize sudo once: `sudo -v`
-- Run comprehensive regression: `cd simulation && python3 test_interact.py`
+- Run comprehensive regression: `cd simulation && sudo python3 test_interact.py`
 
 The simulation bridges RMII traffic to a Linux TAP interface and can be used for ARP/ICMP/UDP functional verification before FPGA deployment.
 
@@ -131,7 +131,7 @@ Windows 下测试前需要关闭防火墙。
 
 - 构建：`cd simulation && make`
 - 手动进行一次 sudo 授权：`sudo -v`
-- 运行完整回归：`cd simulation && python3 test_interact.py`
+- 运行完整回归：`cd simulation && sudo python3 test_interact.py`
 
 该仿真会把 RMII 流量桥接到 Linux TAP 接口，可在上板前完成 ARP/ICMP/UDP 功能验证。
 
@@ -220,7 +220,7 @@ Windows でテストする前にファイアウォールを無効にする必要
 
 - ビルド: `cd simulation && make`
 - 事前に sudo を一回認証: `sudo -v`
-- 総合回帰の実行: `cd simulation && python3 test_interact.py`
+- 総合回帰の実行: `cd simulation && sudo python3 test_interact.py`
 
 このシミュレーションは RMII トラフィックを Linux TAP インターフェースにブリッジし、FPGA 実機投入前の ARP/ICMP/UDP 機能検証に利用できます。
 

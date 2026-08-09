@@ -236,7 +236,7 @@ logic [7:0] rx_data_gd;
 logic rx_data_rdy;
 logic rx_data_fin;
 
-shortint rx_data_byte_cnt;
+logic [15:0] rx_data_byte_cnt;
 byte ethernet_resolve_status;
 
 
@@ -266,7 +266,7 @@ logic [31:0] arp_ip_1;
 
 logic [1:0] arp_clean;
 
-shortint head_len;
+logic [15:0] head_len;
 
 logic [17:0] checksum;
 
@@ -279,9 +279,9 @@ logic [15:0] idf;
 logic [15:0] udp_len;
 logic [15:0] ip_total_len;
 
-shortint rx_head_fifo_head_int;
-shortint rx_head_fifo_head;
-shortint rx_head_fifo_tail = 0;
+logic [15:0] rx_head_fifo_head_int;
+logic [15:0] rx_head_fifo_head;
+logic [15:0] rx_head_fifo_tail;
 logic [31:0] rx_head_fifo[127:0];
 
 logic [31:0] rx_head_data_i_port;
@@ -303,9 +303,9 @@ task rx_head_fifo_push(input [31:0] data);
         rx_head_fifo_head_int <= 0;
 endtask
 
-shortint rx_data_fifo_head_int;
-shortint rx_data_fifo_head;
-shortint rx_data_fifo_tail = 0;
+logic [15:0] rx_data_fifo_head_int;
+logic [15:0] rx_data_fifo_head;
+logic [15:0] rx_data_fifo_tail;
 logic [7:0] rx_data_fifo[8191:0];
 
 logic [7:0] rx_data_fifo_i_port;
@@ -657,7 +657,7 @@ logic test_tx_en;
 logic [7:0] test_data;
 
 byte arp_rpy_stauts;
-shortint arp_rpy_cnt;
+logic [15:0] arp_rpy_cnt;
 
 logic [7:0] arp_head [8:0] = {8'h08,8'h06,8'h00,8'h01,8'h08,8'h00,8'h06,8'h04,8'h00};
 
@@ -685,8 +685,8 @@ logic [15:0] len_buf;
 //len是包的总长度，包含mac地址 / len is the total frame length including MAC addresses
 
 logic [31:0] tx_head_fifo[63:0];
-shortint tx_head_fifo_head=0;
-shortint tx_head_fifo_tail=0;
+logic [15:0] tx_head_fifo_head;
+logic [15:0] tx_head_fifo_tail;
 logic [31:0] tx_head_data_i_port;
 logic [31:0] tx_head_data_o_port;
 logic tx_head_data_i_en;
@@ -695,8 +695,8 @@ logic [6:0] tx_head_data_i_adr;
 
 
 logic [7:0] tx_data_fifo[8191:0];
-shortint tx_data_fifo_head=0;
-shortint tx_data_fifo_tail=0;
+logic [15:0] tx_data_fifo_head;
+logic [15:0] tx_data_fifo_tail;
 logic [7:0] tx_data_data_i_port;
 logic [7:0] tx_data_data_o_port;
 logic tx_data_data_i_en;
@@ -887,8 +887,8 @@ logic ob_data_en;
 logic ob_fin;
 logic ob_busy;
 logic ob_full;
-shortint head_cnt;
-shortint data_cnt;
+logic [15:0] head_cnt;
+logic [15:0] data_cnt;
 
 udp_generator #(.ip_adr(ip_adr)) udp_gen (
     .clk(clk50m),.rst(phy_rdy),
@@ -1080,8 +1080,8 @@ assign crc_next[30] = crc[22] ^ crc[28] ^ crc[31] ^ data_i[4] ^ data_i[7];
 assign crc_next[31] = crc[23] ^ crc[29] ^ data_i[5];
 
 
-shortint begin_ptr;
-shortint end_ptr;
+logic [15:0] begin_ptr;
+logic [15:0] end_ptr;
 
 logic sendout;
 
@@ -1163,14 +1163,14 @@ module tx_ct(
 );
 
 logic[7:0] buffer[2047:0];
-shortint begin_ptr;
-shortint end_ptr;
+logic [15:0] begin_ptr;
+logic [15:0] end_ptr;
 logic[7:0] buffer_out;
 
 byte send_status;
 
 byte tick;
-shortint send_cnt;
+logic [15:0] send_cnt;
 
 logic int_en;
 
@@ -1380,15 +1380,15 @@ module udp_generator #(parameter bit [31:0] ip_adr = 32'd0)(
 
 logic [7:0] buffer[2047:0];
 
-shortint begin_ptr;
-shortint end_ptr;
+logic [15:0] begin_ptr;
+logic [15:0] end_ptr;
 
 logic [7:0] buffer_port_i;
 logic [7:0] buffer_port_o;
 logic buffer_wr;
 
 byte udp_gen_status;
-shortint udp_gen_cnt;
+logic [15:0] udp_gen_cnt;
 
 logic [17:0] checksum;
 logic [17:0] head_checksum;
@@ -1420,7 +1420,7 @@ always_comb begin
 end
 
 logic [7:0] udp_head_p1 [3:0] = {8'h08, 8'h00, 8'h45, 8'h00};
-logic [7:0] udp_head_p2 [3:0] = {8'h40, 8'h00, 8'h40, 8'h11};
+logic [7:0] udp_head_p2 [3:0];
 
 always@(posedge clk or negedge rst)begin
     if(rst == 0)begin
