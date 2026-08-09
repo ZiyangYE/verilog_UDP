@@ -431,7 +431,7 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
             20:begin
                 //如果fifo满了，就直接拒绝接收 / Reject reception when FIFO is full
                 //head 剩余空间小于4 或者 data 剩余空间小于1600 / head free space < 4 or data free space < 1600
-                if((rx_data_fifo_tail + 127 - rx_data_fifo_head_int) % 128 < 4)
+                if((rx_head_fifo_tail + 127 - rx_head_fifo_head_int) % 128 < 4)
                     ethernet_resolve_status <= 100;
                 if((rx_data_fifo_tail + 8191 - rx_data_fifo_head_int) % 8192 < 1600)
                     ethernet_resolve_status <= 100;
@@ -632,21 +632,22 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
         rx_head_av_o<=1'b0;
         rx_data_av_o<=1'b0;
     end else begin
-        rx_head_av_o <= rx_head_fifo_head != rx_head_fifo_tail;
-        if(read_head)rx_head_av_o <= rx_head_fifo_head != (rx_head_fifo_tail+1)%128;
-
-        if(read_head)rx_head_fifo_tail <= (rx_head_fifo_tail+1)%16'd128;
-
-        rx_head_o <= rx_head_fifo[rx_head_fifo_tail];
-        if(read_head) rx_head_o <= rx_head_fifo[(rx_head_fifo_tail+1)%128];
-
-        rx_data_av_o <= rx_data_fifo_head != rx_data_fifo_tail;
-        if(read_data)rx_data_av_o <= rx_data_fifo_head != (rx_data_fifo_tail+1)%8192;
-
-        if(read_data)rx_data_fifo_tail <= (rx_data_fifo_tail+1)%16'd8192;
-
-        rx_data_o <= rx_data_fifo[rx_data_fifo_tail];
-        if(read_data) rx_data_o <= rx_data_fifo[(rx_data_fifo_tail+1)%8192];
+        if(read_head) begin 
+            rx_head_av_o <= rx_head_fifo_head != (rx_head_fifo_tail+1)%128;
+            rx_head_fifo_tail <= (rx_head_fifo_tail+1)%16'd128;
+            rx_head_o <= rx_head_fifo[(rx_head_fifo_tail+1)%128];
+        end else begin
+            rx_head_av_o <= rx_head_fifo_head != rx_head_fifo_tail;
+            rx_head_o <= rx_head_fifo[rx_head_fifo_tail];
+        end
+        if(read_data) begin
+            rx_data_av_o <= rx_data_fifo_head != (rx_data_fifo_tail+1)%8192;
+            rx_data_fifo_tail <= (rx_data_fifo_tail+1)%16'd8192;
+            rx_data_o <= rx_data_fifo[(rx_data_fifo_tail+1)%8192];
+        end else begin
+            rx_data_av_o <= rx_data_fifo_head != rx_data_fifo_tail;
+            rx_data_o <= rx_data_fifo[rx_data_fifo_tail];
+        end
     end
 end
 
