@@ -29,3 +29,9 @@ __pycache__/
 
 # Reference files
 ref/
+
+# note file
+note
+
+# temporary files
+temp/

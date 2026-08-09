@@ -23,6 +23,8 @@ This code will send received packets to the source port +1 of the source address
 
 `udp_test.py` is now a comprehensive ARP/ICMP/UDP test script and is currently intended for Windows testing only.
 
+Windows Firewall must be disabled before testing.
+
 - ARP reachability check
 - ICMP ping check (configurable payload size)
 - UDP matrix + random soak test with latency statistics
@@ -110,6 +112,8 @@ UDP 接口的 Verilog 文件可以在这里找到：`udp_18k/src/udp.sv`
 
 `udp_test.py` 现已升级为 ARP/ICMP/UDP 一体化综合测试脚本，目前定位为仅用于 Windows 测试。
 
+Windows 下测试前需要关闭防火墙。
+
 - ARP 连通性检查
 - ICMP Ping 检查（可配置负载长度）
 - UDP 矩阵与随机压力测试，带延迟统计
@@ -196,6 +200,8 @@ UDPインターフェイスのVerilogファイルは、`udp_18k/src/udp.sv`に�
 ## テスト
 
 `udp_test.py` は ARP/ICMP/UDP をまとめて検証する総合テストに更新され、現時点では Windows テスト専用の位置付けです。
+
+Windows でテストする前にファイアウォールを無効にする必要があります。
 
 - ARP 到達性チェック
 - ICMP Ping チェック（ペイロード長は設定可能）
