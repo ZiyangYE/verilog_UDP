@@ -243,23 +243,37 @@ def arp_resolve_check() -> CheckResult:
     run_cmd(["ip", "neigh", "del", DUT_IP, "dev", TAP_NAME])
 
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    deadline = time.monotonic() + 8.0
+    next_probe = 0.0
+    probe_count = 0
+    last_send_error = ""
     try:
         probe.bind((HOST_IP, BASE_SRC_PORT + 100))
-        probe.sendto(b"arp-probe", (DUT_IP, DUT_PORT))
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_probe:
+                try:
+                    probe.sendto(b"arp-probe", (DUT_IP, DUT_PORT))
+                    probe_count += 1
+                    last_send_error = ""
+                except OSError as exc:
+                    last_send_error = str(exc)
+                next_probe = now + 0.25
+
+            p = run_cmd(["ip", "neigh", "show", "to", DUT_IP, "dev", TAP_NAME])
+            line = p.stdout.strip().lower()
+            if "lladdr" in line and "incomplete" not in line and "failed" not in line:
+                if DUT_MAC in line:
+                    return CheckResult("arp.resolve", True, line)
+                return CheckResult("arp.resolve", False, f"resolved but mac mismatch: {line}")
+            time.sleep(0.1)
     finally:
         probe.close()
 
-    t0 = time.time()
-    while time.time() - t0 < 3.0:
-        p = run_cmd(["ip", "neigh", "show", "to", DUT_IP, "dev", TAP_NAME])
-        line = p.stdout.strip().lower()
-        if "lladdr" in line and "incomplete" not in line and "failed" not in line:
-            ok = DUT_MAC in line
-            if ok:
-                return CheckResult("arp.resolve", True, line)
-            return CheckResult("arp.resolve", False, f"resolved but mac mismatch: {line}")
-        time.sleep(0.2)
-    return CheckResult("arp.resolve", False, "arp entry did not resolve")
+    detail = f"arp entry did not resolve after {probe_count} probes"
+    if last_send_error:
+        detail += f"; last send error: {last_send_error}"
+    return CheckResult("arp.resolve", False, detail)
 
 
 def icmp_echo_wire_check() -> CheckResult:

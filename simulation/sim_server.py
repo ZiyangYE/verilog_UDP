@@ -15,6 +15,7 @@ TAP_NAME = os.environ.get("SIM_TAP", "udptap")
 HOST_IP = os.environ.get("SIM_HOST_IP", "192.168.15.1")
 POLL_INTERVAL_S = 0.25
 BINARY_STABLE_S = 0.75
+TAP_STABLE_S = 0.5
 
 
 def binary_signature():
@@ -36,6 +37,7 @@ def clear_ready_file():
 
 def wait_tap_ready(proc: subprocess.Popen, timeout_s: float = 5.0) -> bool:
     deadline = time.monotonic() + timeout_s
+    ready_since = None
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             return False
@@ -45,7 +47,13 @@ def wait_tap_ready(proc: subprocess.Popen, timeout_s: float = 5.0) -> bool:
             capture_output=True,
         )
         if status.returncode == 0 and HOST_IP in status.stdout:
-            return True
+            now = time.monotonic()
+            if ready_since is None:
+                ready_since = now
+            elif now - ready_since >= TAP_STABLE_S:
+                return True
+        else:
+            ready_since = None
         time.sleep(0.1)
     return False
 
