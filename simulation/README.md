@@ -13,7 +13,8 @@
 
 - `sim_top.sv`: simulation top wrapper instantiating original `udp`
 - `sim_main.cpp`: C++ testbench (TAP bridge + RMII packet injection/collection)
-- `test_interact.py`: layered regression script (core checks + extended diagnostics)
+- `sim_server.py`: privileged persistent simulator supervisor
+- `test_interact.py`: unprivileged regression client
 - `Makefile`: build/run targets
 
 ## Build and Run
@@ -21,21 +22,23 @@
 ```bash
 cd simulation
 make
-python3 test_interact.py
 ```
 
-If privileged TAP operations are required, authorize once manually before running tests:
+For easier agent-driven testing, simulation is split into a privileged persistent server and an unprivileged test client. The server automatically reloads a rebuilt `Vsim_top`.
 
 ```bash
-sudo -v
-```
+# Run once manually and keep it open.
+sudo python3 sim_server.py
 
-Then run regression normally from `simulation/`.
+# Run tests separately without sudo.
+python3 test_interact.py
+python3 test_interact.py --burst-only
+```
 
 ## Regression Modes
 
 - Core checks: ARP resolution, ICMP basic ping, UDP basic roundtrip
-- Extended checks: ICMP wire-level verification, UDP matrix test, UDP wire header verification, negative behavior check, UDP stress test
+- Extended checks: ICMP wire-level verification, UDP matrix test, UDP wire header verification, negative behavior check, UDP burst test, UDP stress test
 
 Default mode is strict (`SIM_STRICT=1`), which means extended check failures cause non-zero exit.
 
@@ -43,6 +46,7 @@ Useful environment variables:
 
 - `SIM_STRICT` (`1` or `0`)
 - `SIM_UDP_MATRIX` (e.g. `2,4,8,16,32,64,128`)
+- `SIM_UDP_BURST` (e.g. `100`)
 - `SIM_UDP_STRESS` (e.g. `40`)
 
 ## Network Defaults
@@ -82,7 +86,8 @@ LAKKA/JA_P_S
 
 - `sim_top.sv`：仿真顶层封装，直接实例化原始 `udp`
 - `sim_main.cpp`：C++ 测试台（TAP 桥接 + RMII 注入/采集）
-- `test_interact.py`：分层回归脚本（核心门禁 + 扩展诊断）
+- `sim_server.py`：需要特权的常驻仿真服务端
+- `test_interact.py`：普通权限回归测试客户端
 - `Makefile`：构建/运行目标
 
 ## 构建与运行
@@ -90,15 +95,23 @@ LAKKA/JA_P_S
 ```bash
 cd simulation
 make
-python3 test_interact.py
 ```
 
-非 root 用户下，`test_interact.py` 会先执行一次 `sudo -v`，随后复用 sudo ticket 启动仿真。
+为方便 Agent 反复编译与测试，仿真分为需要 `sudo` 的常驻服务端和普通权限测试客户端。重新构建 `Vsim_top` 后，服务端会自动重载。
+
+```bash
+# 手动启动一次并保持运行
+sudo python3 sim_server.py
+
+# 测试客户端不需要 sudo
+python3 test_interact.py
+python3 test_interact.py --burst-only
+```
 
 ## 回归模式
 
 - 核心项：ARP 解析、ICMP 基础连通、UDP 基础回环
-- 扩展项：ICMP 线级校验、UDP 矩阵测试、UDP 线级头检查、负向行为检查、UDP 压力测试
+- 扩展项：ICMP 线级校验、UDP 矩阵测试、UDP 线级头检查、负向行为检查、UDP 突发测试、UDP 压力测试
 
 默认 strict 模式为 `SIM_STRICT=1`，扩展项失败会返回非零。
 
@@ -106,6 +119,7 @@ python3 test_interact.py
 
 - `SIM_STRICT`（`1` 或 `0`）
 - `SIM_UDP_MATRIX`（如 `2,4,8,16,32,64,128`）
+- `SIM_UDP_BURST`（如 `100`）
 - `SIM_UDP_STRESS`（如 `40`）
 
 ## 默认网络参数
@@ -145,7 +159,8 @@ LAKKA/JA_P_S
 
 - `sim_top.sv`: 元の `udp` を直接インスタンスするトップラッパ
 - `sim_main.cpp`: C++ テストベンチ（TAP ブリッジ + RMII 注入/回収）
-- `test_interact.py`: レイヤ型回帰スクリプト（コア判定 + 拡張診断）
+- `sim_server.py`: 特権が必要な常駐シミュレータサーバー
+- `test_interact.py`: 一般ユーザー権限の回帰テストクライアント
 - `Makefile`: ビルド/実行ターゲット
 
 ## ビルドと実行
@@ -153,15 +168,23 @@ LAKKA/JA_P_S
 ```bash
 cd simulation
 make
-python3 test_interact.py
 ```
 
-非 root ユーザーの場合、`test_interact.py` は最初に `sudo -v` を実行し、その後 sudo チケットを再利用してシミュレータを起動します。
+Agent による反復的なビルドとテストを容易にするため、シミュレーションを `sudo` が必要な常駐サーバーと一般ユーザー権限のテストクライアントに分離しています。`Vsim_top` の再ビルド後、サーバーは自動的に再読み込みします。
+
+```bash
+# 一度だけ手動で起動し、そのまま実行しておく
+sudo python3 sim_server.py
+
+# テストクライアントは sudo 不要
+python3 test_interact.py
+python3 test_interact.py --burst-only
+```
 
 ## 回帰モード
 
 - コア項目: ARP 解決、ICMP 基本疎通、UDP 基本ラウンドトリップ
-- 拡張項目: ICMP ワイヤ検証、UDP 行列テスト、UDP ヘッダ検証、負系挙動検証、UDP ストレステスト
+- 拡張項目: ICMP ワイヤ検証、UDP 行列テスト、UDP ヘッダ検証、負系挙動検証、UDP バーストテスト、UDP ストレステスト
 
 既定の strict モードは `SIM_STRICT=1` で、拡張項目失敗時は非ゼロ終了になります。
 
@@ -169,6 +192,7 @@ python3 test_interact.py
 
 - `SIM_STRICT`（`1` または `0`）
 - `SIM_UDP_MATRIX`（例: `2,4,8,16,32,64,128`）
+- `SIM_UDP_BURST`（例: `100`）
 - `SIM_UDP_STRESS`（例: `40`）
 
 ## 既定ネットワーク設定

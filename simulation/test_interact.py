@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import random
 import select
-import signal
 import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Callable, Optional
 
 SIM_DIR = Path(__file__).resolve().parent
 SIM_BIN = SIM_DIR / "obj_dir" / "Vsim_top"
+SERVER_READY_FILE = SIM_DIR / "obj_dir" / ".sim_server_ready"
 
 TAP_NAME = os.environ.get("SIM_TAP", "udptap")
 HOST_IP = os.environ.get("SIM_HOST_IP", "192.168.15.1")
@@ -26,8 +28,14 @@ BASE_SRC_PORT = int(os.environ.get("SIM_SRC_PORT", "12345"))
 _udp_matrix_env = os.environ.get("SIM_UDP_MATRIX", "1,2,3,4,5,6,7,8,15,16,17,18,31,32,33,34,63,64,65,66,127,128,129,130")
 UDP_MATRIX = [int(x) for x in _udp_matrix_env.split(",") if x.strip()]
 UDP_STRESS_COUNT = int(os.environ.get("SIM_UDP_STRESS", "40"))
+UDP_BURST_COUNT = int(os.environ.get("SIM_UDP_BURST", "100"))
+UDP_BURST_MAX_SIZE = int(os.environ.get("SIM_UDP_BURST_MAX_SIZE", "1400"))
+UDP_BURST_TIMEOUT_S = float(os.environ.get("SIM_UDP_BURST_TIMEOUT", "3.0"))
 PING_SIZE = int(os.environ.get("SIM_PING_SIZE", "32"))
 STRICT_MODE = os.environ.get("SIM_STRICT", "1") == "1"
+
+BURST_MAGIC = b"SIMBURST"
+BURST_HEADER_SIZE = len(BURST_MAGIC) + 6
 
 
 @dataclass
@@ -44,35 +52,6 @@ def run_cmd(cmd, check=False, timeout=None):
     return p
 
 
-def stop_sim(proc: subprocess.Popen):
-    if proc.poll() is not None:
-        return
-    proc.send_signal(signal.SIGTERM)
-    try:
-        proc.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=3)
-
-
-def drain_output(proc: subprocess.Popen, max_lines: int = 80, timeout_s: float = 0.25):
-    lines = []
-    if proc.stdout is None:
-        return lines
-    fd = proc.stdout.fileno()
-    deadline = time.time() + timeout_s
-    while len(lines) < max_lines and time.time() < deadline:
-        wait_s = max(0.0, deadline - time.time())
-        rlist, _, _ = select.select([fd], [], [], wait_s)
-        if not rlist:
-            break
-        line = proc.stdout.readline()
-        if not line:
-            break
-        lines.append(line.rstrip())
-    return lines
-
-
 def wait_tap_up(name: str, timeout_s: float = 10.0) -> bool:
     t0 = time.time()
     while time.time() - t0 < timeout_s:
@@ -83,19 +62,41 @@ def wait_tap_up(name: str, timeout_s: float = 10.0) -> bool:
     return False
 
 
-def start_sim() -> subprocess.Popen:
-    if not SIM_BIN.exists():
-        raise FileNotFoundError(f"simulation binary not found: {SIM_BIN}")
+def simulator_binary_signature():
+    try:
+        stat = SIM_BIN.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
 
-    cmd = [str(SIM_BIN), TAP_NAME] if os.geteuid() == 0 else ["sudo", str(SIM_BIN), TAP_NAME]
-    return subprocess.Popen(
-        cmd,
-        cwd=str(SIM_DIR),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
+
+def loaded_simulator_signature():
+    try:
+        parts = SERVER_READY_FILE.read_text(encoding="ascii").split()
+        return int(parts[0]), int(parts[1])
+    except (FileNotFoundError, IndexError, OSError, ValueError):
+        return None
+
+
+def wait_simulator_ready(timeout_s: float = 10.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        binary_signature = simulator_binary_signature()
+        if binary_signature is not None and loaded_simulator_signature() == binary_signature:
+            if wait_tap_up(TAP_NAME, timeout_s=0.2):
+                return True
+        time.sleep(0.1)
+    return False
+
+
+def raw_packet_access_available() -> bool:
+    try:
+        probe = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0003))
+    except PermissionError:
+        return False
+    else:
+        probe.close()
+        return True
 
 
 def get_iface_mac(ifname: str) -> str:
@@ -503,6 +504,155 @@ def udp_negative_wrong_port() -> CheckResult:
         send.close()
 
 
+def udp_burst_check() -> CheckResult:
+    if UDP_BURST_COUNT <= 0:
+        return CheckResult("udp.burst", True, "disabled")
+    if UDP_BURST_MAX_SIZE < BURST_HEADER_SIZE:
+        return CheckResult(
+            "udp.burst",
+            False,
+            f"SIM_UDP_BURST_MAX_SIZE must be >= {BURST_HEADER_SIZE}",
+        )
+
+    rng = random.Random(20260319)
+    payloads = []
+    for sequence in range(UDP_BURST_COUNT):
+        size = rng.randint(BURST_HEADER_SIZE, UDP_BURST_MAX_SIZE)
+        header = BURST_MAGIC + sequence.to_bytes(4, "big") + size.to_bytes(2, "big")
+        payloads.append(header + bytes(rng.getrandbits(8) for _ in range(size - len(header))))
+
+    recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    src_port = BASE_SRC_PORT + 1100
+    recv_port = src_port + 1
+
+    packets = []
+    receiver_errors = []
+    receiver_ready = threading.Event()
+    send_done = threading.Event()
+    stop_receiver = threading.Event()
+    receive_deadline = [float("inf")]
+
+    def receive_worker():
+        seen_sequences = set()
+        quiet_deadline = float("inf")
+        recv.settimeout(0.02)
+        receiver_ready.set()
+
+        while not stop_receiver.is_set():
+            now = time.perf_counter()
+            if send_done.is_set():
+                if len(seen_sequences) == UDP_BURST_COUNT and quiet_deadline == float("inf"):
+                    quiet_deadline = now + 0.02
+                if now >= receive_deadline[0] or now >= quiet_deadline:
+                    break
+
+            try:
+                data, addr = recv.recvfrom(65535)
+            except socket.timeout:
+                continue
+            except OSError as e:
+                if not stop_receiver.is_set():
+                    receiver_errors.append(str(e))
+                break
+
+            packets.append((data, addr))
+            if len(data) >= BURST_HEADER_SIZE and data.startswith(BURST_MAGIC):
+                sequence = int.from_bytes(data[len(BURST_MAGIC) : len(BURST_MAGIC) + 4], "big")
+                if sequence < UDP_BURST_COUNT:
+                    seen_sequences.add(sequence)
+                    if send_done.is_set() and len(seen_sequences) == UDP_BURST_COUNT:
+                        quiet_deadline = time.perf_counter() + 0.02
+
+    try:
+        recv.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+        send.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
+        recv.bind((HOST_IP, recv_port))
+        send.bind((HOST_IP, src_port))
+
+        receiver = threading.Thread(target=receive_worker, name="sim-udp-burst-rx", daemon=True)
+        receiver.start()
+        if not receiver_ready.wait(1.0):
+            stop_receiver.set()
+            receiver.join(0.1)
+            return CheckResult("udp.burst", False, "receiver thread did not start")
+
+        sent = 0
+        send_errors = []
+        for sequence, payload in enumerate(payloads):
+            try:
+                send.sendto(payload, (DUT_IP, DUT_PORT))
+                sent += 1
+            except OSError as e:
+                send_errors.append(f"seq={sequence}: {e}")
+
+        receive_deadline[0] = time.perf_counter() + UDP_BURST_TIMEOUT_S
+        send_done.set()
+        receiver.join(UDP_BURST_TIMEOUT_S + 0.5)
+        if receiver.is_alive():
+            stop_receiver.set()
+            receiver.join(0.1)
+    finally:
+        stop_receiver.set()
+        recv.close()
+        send.close()
+
+    matched = set()
+    duplicates = 0
+    unexpected = 0
+    mismatched = 0
+    out_of_order = 0
+    highest_sequence = -1
+
+    for data, addr in packets:
+        if addr[0] != DUT_IP or addr[1] != DUT_PORT:
+            unexpected += 1
+            continue
+        if len(data) < BURST_HEADER_SIZE or not data.startswith(BURST_MAGIC):
+            unexpected += 1
+            continue
+
+        sequence = int.from_bytes(data[len(BURST_MAGIC) : len(BURST_MAGIC) + 4], "big")
+        if sequence >= UDP_BURST_COUNT:
+            unexpected += 1
+            continue
+        if sequence in matched:
+            duplicates += 1
+            continue
+        if data != payloads[sequence]:
+            mismatched += 1
+            continue
+
+        if sequence < highest_sequence:
+            out_of_order += 1
+        highest_sequence = max(highest_sequence, sequence)
+        matched.add(sequence)
+
+    missing_sequences = [sequence for sequence in range(UDP_BURST_COUNT) if sequence not in matched]
+    ok = (
+        sent == UDP_BURST_COUNT
+        and len(matched) == UDP_BURST_COUNT
+        and duplicates == 0
+        and unexpected == 0
+        and mismatched == 0
+        and out_of_order == 0
+        and not receiver_errors
+        and not send_errors
+    )
+    details = (
+        f"sent={sent} received={len(packets)} matched={len(matched)} "
+        f"missing={len(missing_sequences)} duplicates={duplicates} "
+        f"unexpected={unexpected} mismatched={mismatched} out_of_order={out_of_order}"
+    )
+    if missing_sequences:
+        details += f" missing_samples={missing_sequences[:8]}"
+    if receiver_errors:
+        details += f" receiver_error={receiver_errors[0]}"
+    if send_errors:
+        details += f" send_error={send_errors[0]}"
+    return CheckResult("udp.burst", ok, details)
+
+
 def udp_stress_check() -> CheckResult:
     recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -569,13 +719,23 @@ def run_suite() -> tuple[list[CheckResult], list[CheckResult]]:
         udp_basic_check,
     ]
 
-    ext_tests = [
-        icmp_echo_wire_check,
-        udp_matrix_check,
-        udp_wire_header_check,
-        udp_negative_wrong_port,
-        udp_stress_check,
-    ]
+    ext_tests = []
+    raw_available = raw_packet_access_available()
+    if raw_available:
+        ext_tests.append(icmp_echo_wire_check)
+    else:
+        print("[skip] icmp.wire and udp.wire: raw packet access is unavailable")
+
+    ext_tests.append(udp_matrix_check)
+    if raw_available:
+        ext_tests.append(udp_wire_header_check)
+    ext_tests.extend(
+        [
+            udp_negative_wrong_port,
+            udp_burst_check,
+            udp_stress_check,
+        ]
+    )
 
     for test in core_tests:
         name = test.__name__
@@ -604,60 +764,63 @@ def run_suite() -> tuple[list[CheckResult], list[CheckResult]]:
     return core_results, ext_results
 
 
+def run_burst_only() -> int:
+    checks = [arp_resolve_check, udp_basic_check, udp_burst_check]
+    results = []
+    for test in checks:
+        t0 = time.time()
+        try:
+            result = test()
+        except Exception as e:
+            result = CheckResult(test.__name__, False, f"exception: {e}")
+        dt_ms = int((time.time() - t0) * 1000)
+        status = "ok" if result.ok else "fail"
+        print(f"[{status}] {result.name} ({dt_ms} ms): {result.details}")
+        results.append(result)
+        if not result.ok and test is not udp_burst_check:
+            break
+    return 1 if any(not result.ok for result in results) else 0
+
+
 def main() -> int:
-    print("[step] starting simulator...")
-    try:
-        sim = start_sim()
-    except Exception as e:
-        print(f"[error] failed to start simulator: {e}")
-        return 2
+    parser = argparse.ArgumentParser(description="Unprivileged client for the persistent UDP simulator")
+    parser.add_argument("--burst-only", action="store_true", help="run ARP/UDP preflight and the burst check only")
+    args = parser.parse_args()
 
-    try:
-        time.sleep(0.3)
-        if sim.poll() is not None:
-            for line in drain_output(sim):
-                print(line)
-            print("[error] simulator exited early")
-            return 2
+    if not wait_simulator_ready(timeout_s=10.0):
+        print(f"[error] simulator on TAP {TAP_NAME!r} is not ready with the current Vsim_top build")
+        print("[hint] start or restart the supervisor with: sudo python3 sim_server.py")
+        return 3
 
-        if not wait_tap_up(TAP_NAME, timeout_s=10.0):
-            print("[error] TAP interface did not come up in time")
-            for line in drain_output(sim):
-                print(line)
-            return 3
+    print(f"[step] using persistent TAP {TAP_NAME}, host ip {HOST_IP}, dut ip {DUT_IP}")
+    if args.burst_only:
+        return run_burst_only()
 
-        print(f"[step] TAP ready on {TAP_NAME}, host ip {HOST_IP}, dut ip {DUT_IP}")
-        core_results, ext_results = run_suite()
+    core_results, ext_results = run_suite()
+    core_failed = [r for r in core_results if not r.ok]
+    ext_failed = [r for r in ext_results if not r.ok]
 
-        for line in drain_output(sim, max_lines=50):
-            print(line)
+    if core_failed:
+        print("[fail] core regression has failing checks:")
+        for result in core_failed:
+            print(f"  - {result.name}: {result.details}")
+        return 1
 
-        core_failed = [r for r in core_results if not r.ok]
-        ext_failed = [r for r in ext_results if not r.ok]
+    if ext_failed and STRICT_MODE:
+        print("[fail] strict mode enabled; extended checks failed:")
+        for result in ext_failed:
+            print(f"  - {result.name}: {result.details}")
+        return 1
 
-        if core_failed:
-            print("[fail] core regression has failing checks:")
-            for r in core_failed:
-                print(f"  - {r.name}: {r.details}")
-            return 1
-
-        if ext_failed and STRICT_MODE:
-            print("[fail] strict mode enabled; extended checks failed:")
-            for r in ext_failed:
-                print(f"  - {r.name}: {r.details}")
-            return 1
-
-        if ext_failed:
-            print("[pass] core regression passed; extended diagnostics found issues:")
-            for r in ext_failed:
-                print(f"  - {r.name}: {r.details}")
-            print("[hint] set SIM_STRICT=1 to gate on extended diagnostics")
-            return 0
-
-        print("[pass] core + extended ARP/ICMP/UDP regression passed")
+    if ext_failed:
+        print("[pass] core regression passed; extended diagnostics found issues:")
+        for result in ext_failed:
+            print(f"  - {result.name}: {result.details}")
+        print("[hint] set SIM_STRICT=1 to gate on extended diagnostics")
         return 0
-    finally:
-        stop_sim(sim)
+
+    print("[pass] available unprivileged ARP/ICMP/UDP regression passed")
+    return 0
 
 
 if __name__ == "__main__":
