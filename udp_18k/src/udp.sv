@@ -1228,6 +1228,9 @@ byte send_status;
 byte tick;
 logic [15:0] send_cnt;
 
+// IEEE 802.3 interpacket gap: 96 bit times = 48 RMII clocks at 100 Mbps.
+localparam logic [15:0] RMII_IFG_CYCLES = 16'd48;
+
 logic int_en;
 
 
@@ -1387,11 +1390,14 @@ always_ff@(posedge clk or negedge rst)begin
                     end
                 end
             end
-            5:begin //wait for 4 cycles
-                p_txd <= 2'bXX;
+            5:begin //hold TX_EN low for the complete Ethernet interpacket gap
+                p_txd <= 2'b00;
                 p_txen <= 1'b0;
-                if(tick == 3)begin
+                if(send_cnt == RMII_IFG_CYCLES - 16'd1)begin
                     send_status <= 0;
+                    send_cnt <= 0;
+                end else begin
+                    send_cnt <= send_cnt + 16'd1;
                 end
             end
         endcase

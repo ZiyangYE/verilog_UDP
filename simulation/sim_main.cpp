@@ -101,8 +101,13 @@ static uint32_t crc32_buf(const uint8_t *buf, size_t len)
 // Monitors txen/txd from DUT.  When txen goes low after a frame,
 // strips preamble+SFD+CRC and writes the payload to the TAP fd.
 
+static constexpr uint32_t RMII_MIN_IFG_CYCLES = 48;
+
 struct RmiiRxCollector {
     bool        active  = false;
+    bool        seen_frame = false;
+    bool        drop_current = false;
+    uint32_t    idle_cycles = RMII_MIN_IFG_CYCLES;
     std::vector<uint8_t> raw;   // raw dibits reassembled to bytes
     uint8_t     cur_byte = 0;
     int         bit_pos  = 0;
@@ -110,15 +115,38 @@ struct RmiiRxCollector {
     void feed(uint8_t txen, uint8_t txd)
     {
         if (!active) {
-            if (txen) { active = true; raw.clear(); bit_pos = 0; }
-            else return;
+            if (txen) {
+                drop_current = seen_frame && idle_cycles < RMII_MIN_IFG_CYCLES;
+                if (drop_current) {
+                    fprintf(
+                        stderr,
+                        "[tx_col] IFG violation: %u RMII clocks, need at least %u; dropping frame\n",
+                        idle_cycles,
+                        RMII_MIN_IFG_CYCLES
+                    );
+                }
+                active = true;
+                raw.clear();
+                cur_byte = 0;
+                bit_pos = 0;
+            } else {
+                if (idle_cycles < RMII_MIN_IFG_CYCLES)
+                    ++idle_cycles;
+                return;
+            }
         }
         if (!txen) {
             // end of frame
-            flush_frame();
+            if (!drop_current)
+                flush_frame();
             active = false;
+            seen_frame = true;
+            drop_current = false;
+            idle_cycles = 1;
             return;
         }
+        if (drop_current)
+            return;
         cur_byte |= (txd & 3) << bit_pos;
         bit_pos += 2;
         if (bit_pos == 8) {
