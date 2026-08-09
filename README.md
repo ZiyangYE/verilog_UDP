@@ -67,7 +67,9 @@ Useful tuning knobs:
 
 This code uses an RMII interface, and is only suitable for 100M Ethernet, not suitable for 10M Ethernet.
 
-The serial management interface of this code is only suitable for RTL8201. It configures the CRS/CRS_DV pin as RXDV function, waits for the connection to be established, sets the `phy_rdy` bit (i.e., sets the ready interface), and then can start working. This logic could be modified for other PHY chips if needed.
+The serial management interface of this code is only suitable for RTL8201. It ~~configures the CRS/CRS_DV pin as RXDV function,~~* waits for the connection to be established, sets the `phy_rdy` bit (i.e., sets the ready interface), and then can start working. This logic could be modified for other PHY chips if needed.
+
+\* The current implementation has been changed back to CRS_DV.
 
 This code is written in System Verilog and is not compatible with Verilog 2005.
 
@@ -156,7 +158,9 @@ Windows 下测试前需要关闭防火墙。
 
 这段代码使用 RMII 接口，仅适用于 100M 以太网，不适用于 10M 以太网。
 
-这段代码的串行管理接口仅适用于 RTL8201。它将 CRS/CRS_DV 引脚配置为 RXDV 功能，等待连接建立后，设置 `phy_rdy` 位（即设置 ready 接口），然后可以开始工作。如果需要，可以修改此逻辑以用于其他 PHY 芯片。
+这段代码的串行管理接口仅适用于 RTL8201。它~~将 CRS/CRS_DV 引脚配置为 RXDV 功能，~~*等待连接建立后，设置 `phy_rdy` 位（即设置 ready 接口），然后可以开始工作。如果需要，可以修改此逻辑以用于其他 PHY 芯片。
+
+\* 当前实现已改回使用 CRS_DV。
 
 这段代码使用 System Verilog 编写，不兼容于 Verilog 2005。
 
@@ -245,7 +249,9 @@ Windows でテストする前にファイアウォールを無効にする必要
 
 このコードはRMIIインターフェイスを使用し、100M Ethernet専用であり、10M Ethernetには適していません。
 
-このコードのシリアル管理インターフェイスはRTL8201専用です。これはCRS/CRS_DVピンをRXDV機能として設定し、接続が確立されるのを待ってから`phy_rdy`ビットを設定（つまり、readyインターフェイスを設定）し、その後作業を開始します。必要であれば、このロジックは他のPHYチップに対して修正可能です。
+このコードのシリアル管理インターフェイスはRTL8201専用です。~~これはCRS/CRS_DVピンをRXDV機能として設定し、~~*接続が確立されるのを待ってから`phy_rdy`ビットを設定（つまり、readyインターフェイスを設定）し、その後作業を開始します。必要であれば、このロジックは他のPHYチップに対して修正可能です。
+
+\* 現在の実装はCRS_DVを使用する設定に戻されています。
 
 このコードはSystem Verilogで記述されており、Verilog 2005とは互換性がありません。
 

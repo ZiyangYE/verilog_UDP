@@ -105,7 +105,11 @@ always_ff@(posedge clk1m or negedge rst)begin
                     end
                     1:begin
                         SMI_adr <= 5'd16;
-                        SMI_wdata <= 16'hFFE;
+                        // SET CRS_DV TO RXDV
+                        // SMI_wdata <= 16'h0FFE;
+
+                        // KEEP CRS_DV FOR COMPATIBILITY WITH OTHER PHYs
+                        SMI_wdata <= 16'h0FFA;
 
                         SMI_status <= 2;
                     end
@@ -169,6 +173,12 @@ logic[7:0] rx_data_s;
 
 logic crs;
 assign crs = netrmii.rx_crs;
+
+logic last_crs;
+logic rmii_dv;
+
+assign rmii_dv = crs || last_crs;
+
 logic[1:0] rxd;
 assign rxd = netrmii.rxd;
 
@@ -186,8 +196,11 @@ logic fifo_drop;
 always @(posedge clk50m or negedge phy_rdy) begin
     if(phy_rdy==1'b0)begin
         cnt <=0;
+        last_crs <= 1'b0;
     end else begin
-        if(crs)begin
+        last_crs <= crs;
+
+        if(rmii_dv)begin
             tick <= tick + 8'd1;
             if(tick == 3)tick <= 0;
         end
@@ -217,16 +230,16 @@ always @(posedge clk50m or negedge phy_rdy) begin
                 end
             end
             3:begin
-                if(crs == 1'b0)
+                if(rmii_dv == 1'b0)
                     fifo_drop <= 1'b1;
             end
         endcase
 
-        if(crs == 1'b0)begin
+        if(rmii_dv == 1'b0)begin
             rx_state<=0;
             rx_data_s <= 8'b00XXXXXX;
         end
-        if(crs)begin
+        if(rmii_dv)begin
             rx_data_s <= {rxd,rx_data_s[7:2]};
         end
     end
