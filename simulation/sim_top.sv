@@ -1,5 +1,9 @@
 `include "rmii.svh"
 
+`ifndef SIM_TX_IFG_CYCLES
+`define SIM_TX_IFG_CYCLES 48
+`endif
+
 module sim_top (
     input  logic        clk,
     input  logic        rst,
@@ -54,7 +58,8 @@ module sim_top (
         .ip_adr({8'd192,8'd168,8'd15,8'd14}),
         .mac_adr({8'h06,8'h00,8'hAA,8'hBB,8'h0C,8'hDD}),
         .arp_refresh_interval(50000000*15),
-        .arp_max_life_time(50000000*30)
+        .arp_max_life_time(50000000*30),
+        .tx_ifg_cycles(`SIM_TX_IFG_CYCLES)
     ) udp_inst(
         .clk1m(clk),
         .rst(rst),
@@ -85,7 +90,7 @@ module sim_top (
     end
 
     always_comb begin
-        rx_data_rdy <= tx_state == 5 && tx_req_rdy && tx_data_rdy
+        rx_data_rdy <= tx_state == 5 && tx_data_rdy
                        && rx_payload_count < rx_payload_len;
         tx_data <= rx_data;
         tx_data_av <= rx_data_av && rx_data_rdy;

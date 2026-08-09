@@ -89,7 +89,7 @@ udp #(
 );
 
 always_comb begin
-    rx_data_rdy <= tx_state == 5 && tx_req_rdy && tx_data_rdy
+    rx_data_rdy <= tx_state == 5 && tx_data_rdy
                    && rx_payload_count < rx_payload_len;
     tx_data <= rx_data;
     tx_data_av <= rx_data_av && rx_data_rdy;

@@ -8,6 +8,7 @@
 
 SRC_DIR  := ../udp_18k/src
 SIM_DIR  := .
+SIM_TX_IFG_CYCLES ?= 48
 
 # Verilator flags
 VFLAGS   := --sv --cc --exe \
@@ -26,6 +27,7 @@ VFLAGS   := --sv --cc --exe \
             --Wno-SYNCASYNCNET \
             --Wno-EOFNEWLINE \
             --Wno-VARHIDDEN \
+            -DSIM_TX_IFG_CYCLES=$(SIM_TX_IFG_CYCLES) \
             --Mdir obj_dir \
             --top-module sim_top
 

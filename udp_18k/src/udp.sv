@@ -34,7 +34,8 @@ module udp
     parameter bit [47:0] mac_adr = 48'd0,
     
     parameter int arp_refresh_interval = 50000000*2,
-    parameter int arp_max_life_time = 50000000*10
+    parameter int arp_max_life_time = 50000000*10,
+    parameter logic [15:0] tx_ifg_cycles = 16'd48
 )(
     input clk1m,
     input rst,
@@ -679,7 +680,7 @@ logic [7:0] arp_head [8:0] = {8'h08,8'h06,8'h00,8'h01,8'h08,8'h00,8'h06,8'h04,8'
 logic tx_bz;
 logic tx_av;
 
-tx_ct ctct(
+tx_ct #(.RMII_IFG_CYCLES(tx_ifg_cycles)) ctct(
     .clk(clk50m), .rst(phy_rdy),
     .data(test_data),
     .tx_en(test_tx_en),
@@ -907,6 +908,9 @@ logic ob_busy;
 logic ob_full;
 logic [15:0] head_cnt;
 logic [15:0] data_cnt;
+logic [15:0] ob_frame_data_len;
+logic [15:0] tx_head_fifo_free;
+logic [15:0] tx_data_fifo_free;
 
 udp_generator #(.ip_adr(ip_adr)) udp_gen (
     .clk(clk50m),.rst(phy_rdy),
@@ -932,12 +936,22 @@ udp_generator #(.ip_adr(ip_adr)) udp_gen (
     .data_en(ob_data_en),
     .fin(ob_fin),
     .busy(ob_busy),
-    .full(ob_full)
+    .full(ob_full),
+    .frame_data_len_o(ob_frame_data_len)
 );
 
 always_comb begin
-    tx_req_rdy_o <= ~ob_busy;
-    tx_data_rdy_o <= ~ob_full;
+    // Keep one ring entry unused so equal pointers continue to mean empty.
+    tx_head_fifo_free = (tx_head_fifo_tail + 16'd63
+                         - tx_head_fifo_head) % 16'd64;
+    tx_data_fifo_free = (tx_data_fifo_tail + 16'd8191
+                         - tx_data_fifo_head) % 16'd8192;
+
+    // A request is accepted only when the complete generated frame fits.
+    tx_req_rdy_o = !ob_busy
+                   && tx_head_fifo_free >= 16'd2
+                   && tx_data_fifo_free >= ob_frame_data_len;
+    tx_data_rdy_o = !ob_busy && !ob_full;
 end
 
 
@@ -1207,7 +1221,9 @@ end
 endmodule
 
 
-module tx_ct(
+module tx_ct #(
+    parameter logic [15:0] RMII_IFG_CYCLES = 16'd48
+)(
     input clk, rst,
     input [7:0] data,
     input tx_en,
@@ -1227,9 +1243,6 @@ byte send_status;
 
 byte tick;
 logic [15:0] send_cnt;
-
-// IEEE 802.3 interpacket gap: 96 bit times = 48 RMII clocks at 100 Mbps.
-localparam logic [15:0] RMII_IFG_CYCLES = 16'd48;
 
 logic int_en;
 
@@ -1437,7 +1450,8 @@ module udp_generator #(parameter bit [31:0] ip_adr = 32'd0)(
 
     output logic busy,
 
-    output logic full
+    output logic full,
+    output logic [15:0] frame_data_len_o
 );
 
 logic [7:0] buffer[2047:0];
@@ -1474,6 +1488,7 @@ logic [15:0] udp_len;
 always_comb begin
     head_len <= 16'd28 + sendlen[15:0];
     udp_len <= 16'd8 + sendlen[15:0];
+    frame_data_len_o <= 16'd30 + sendlen[15:0];
     send_checksum <= 16'hFFEF - checksum[15:0];
     icmp_cksun_out <= icmp_checksum_i + 16'h0800;
     if(checksum[15:0]>16'hFFEF)begin
