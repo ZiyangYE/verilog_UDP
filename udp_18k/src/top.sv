@@ -41,6 +41,7 @@ logic[31:0] rx_head;
 logic rx_data_av;
 logic[7:0] rx_data;
 logic rx_head_rdy;
+logic rx_data_rdy;
 
 logic [31:0] tx_ip;
 logic [15:0] tx_dst_port;
@@ -49,6 +50,9 @@ logic [7:0] tx_data;
 logic tx_data_av;
 logic tx_req_rdy;
 logic tx_data_rdy;
+
+logic [15:0] rx_payload_len;
+logic [15:0] rx_payload_count;
 
 udp #(
     .ip_adr({8'd192,8'd168,8'd15,8'd14}),
@@ -70,7 +74,7 @@ udp #(
     .rx_head_rdy_i(rx_head_rdy),
     .rx_head_av_o(rx_head_av),
     .rx_head_o(rx_head),
-    .rx_data_rdy_i(1'b1),
+    .rx_data_rdy_i(rx_data_rdy),
     .rx_data_av_o(rx_data_av),
     .rx_data_o(rx_data),
 
@@ -85,8 +89,10 @@ udp #(
 );
 
 always_comb begin
+    rx_data_rdy <= tx_state == 5 && tx_req_rdy && tx_data_rdy
+                   && rx_payload_count < rx_payload_len;
     tx_data <= rx_data;
-    tx_data_av <= rx_data_av;
+    tx_data_av <= rx_data_av && rx_data_rdy;
 end
 
 byte tx_state;
@@ -102,6 +108,9 @@ always_ff@(posedge clk50m or negedge ready)begin
     if(ready == 0)begin
         tx_state <= 0;
         rx_head_rdy <= 1'b0;
+        tx_req <= 1'b0;
+        rx_payload_len <= 16'd0;
+        rx_payload_count <= 16'd0;
     end else begin
         tx_req <= 1'b0;
         rx_head_rdy <= 1'b0;
@@ -128,13 +137,24 @@ always_ff@(posedge clk50m or negedge ready)begin
                 tx_state <= 4;
             end
             4:begin
+                rx_payload_len <= rx_head[15:0];
+                rx_payload_count <= 16'd0;
                 tx_state <= 5;
             end
-            5:begin // wait until data is all received and req is ready
-                if(tx_req_rdy && rx_data_av == 1'b0)begin
+            5:begin // forward exactly one payload
+                if(rx_payload_len == 0)begin
+                    tx_state <= 6;
+                end else if(rx_data_av && rx_data_rdy)begin
+                    rx_payload_count <= rx_payload_count + 16'd1;
+                    if(rx_payload_count + 16'd1 == rx_payload_len)
+                        tx_state <= 6;
+                end
+            end
+            6:begin // allow the final buffered byte to commit before req
+                if(tx_req_rdy)begin
                     tx_req <= 1'b1;
                     tx_state <= 0;
-                end                
+                end
             end
         endcase
     end

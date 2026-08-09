@@ -45,6 +45,9 @@ module sim_top (
     logic tx_req_rdy;
     logic tx_data_rdy;
 
+    logic [15:0] rx_payload_len;
+    logic [15:0] rx_payload_count;
+
     assign ready_o = ready;
 
     udp #(
@@ -82,9 +85,10 @@ module sim_top (
     end
 
     always_comb begin
-        rx_data_rdy <= tx_data_rdy;
+        rx_data_rdy <= tx_state == 5 && tx_req_rdy && tx_data_rdy
+                       && rx_payload_count < rx_payload_len;
         tx_data <= rx_data;
-        tx_data_av <= rx_data_av && tx_data_rdy;
+        tx_data_av <= rx_data_av && rx_data_rdy;
     end
 
     byte tx_state;
@@ -92,6 +96,9 @@ module sim_top (
         if(ready == 0) begin
             tx_state <= 0;
             rx_head_rdy <= 1'b0;
+            tx_req <= 1'b0;
+            rx_payload_len <= 16'd0;
+            rx_payload_count <= 16'd0;
         end else begin
             tx_req <= 1'b0;
             rx_head_rdy <= 1'b0;
@@ -114,8 +121,19 @@ module sim_top (
                         tx_dst_port <= rx_head[31:16] + 16'd1;
                         tx_state <= 4;
                    end
-                4: tx_state <= 5;
-                5: if(tx_req_rdy && rx_data_av == 1'b0) begin
+                4: begin
+                        rx_payload_len <= rx_head[15:0];
+                        rx_payload_count <= 16'd0;
+                        tx_state <= 5;
+                   end
+                5: if(rx_payload_len == 0) begin
+                        tx_state <= 6;
+                   end else if(rx_data_av && rx_data_rdy) begin
+                        rx_payload_count <= rx_payload_count + 16'd1;
+                        if(rx_payload_count + 16'd1 == rx_payload_len)
+                            tx_state <= 6;
+                   end
+                6: if(tx_req_rdy) begin
                         tx_req <= 1'b1;
                         tx_state <= 0;
                    end

@@ -528,7 +528,7 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                     end
 
                     if(rx_data_byte_cnt == 14 + ip_total_len)begin
-                        rx_head_fifo_push({idf,16'd0});
+                        rx_head_fifo_push({idf,ip_total_len - head_len - 16'd8});
                         ethernet_resolve_status <= 29;
                         rx_commit_pending <= 1'b1;
                     end
@@ -742,6 +742,7 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
 
         tx_head_fifo_tail <= 0;
         tx_data_fifo_tail <= 0;
+        longdelay <= 0;
     end else begin
         arp_rpy_fin <= 1'b0;
         test_tx_en <= 1'b0;
@@ -766,16 +767,19 @@ always_ff@(posedge clk50m or negedge phy_rdy)begin
                             tx_head_fifo_tail <= (tx_head_fifo_tail + 1)%16'd64;
                             arp_target_mac <= arp_mac_0;
                             arp_rpy_stauts <= 3;
+                            longdelay <= 0;
                         end
                         if(tx_head_data_o_port == arp_ip_1 && arp_list[1])begin//对应arp1 / Matched ARP slot 1
                             tx_head_fifo_tail <= (tx_head_fifo_tail + 1)%16'd64;
                             arp_target_mac <= arp_mac_1;
                             arp_rpy_stauts <= 3;
+                            longdelay <= 0;
                         end
                         if(tx_head_data_o_port == 32'hFFFFFFFF)begin//广播 / Broadcast
                             tx_head_fifo_tail <= (tx_head_fifo_tail + 1)%16'd64;
                             arp_target_mac <= 48'hFFFFFFFFFFFF;
                             arp_rpy_stauts <= 3;
+                            longdelay <= 0;
                         end
                     end else begin //定时请求arp刷新 / Periodic ARP refresh request
                         arp_refresh_cnt <= arp_refresh_cnt + 1;
@@ -1096,17 +1100,36 @@ assign crc_next[31] = crc[23] ^ crc[29] ^ data_i[5];
 
 logic [15:0] begin_ptr;
 logic [15:0] end_ptr;
+logic [15:0] frame_start_ptr;
 
 logic sendout;
+logic [15:0] send_end_ptr;
+
+// A completed frame cannot be exposed until its CRC has been checked.  Keep
+// several validated end pointers so reception can continue while an earlier
+// frame is being delivered to the protocol parser.
+logic [15:0] frame_end_fifo [3:0];
+logic [1:0] frame_end_fifo_head;
+logic [1:0] frame_end_fifo_tail;
+logic [2:0] frame_end_fifo_count;
+logic frame_end_fifo_push;
+logic frame_end_fifo_pop;
 
 logic [7:0] bdata_gd;
 logic brdy;
 logic bfin;
 
+always_comb begin
+    frame_end_fifo_pop = !sendout && frame_end_fifo_count != 0;
+    frame_end_fifo_push = stp && crc == 32'hC704DD7B
+                          && (frame_end_fifo_count < 4 || frame_end_fifo_pop);
+end
+
 always_ff@(posedge clk or negedge rst)begin
     if(rst == 1'b0)begin
         begin_ptr <= 0;
         end_ptr <= 0;
+        frame_start_ptr <= 0;
         rdy <= 1'b0;
         fin <= 1'b0;
 
@@ -1114,6 +1137,11 @@ always_ff@(posedge clk or negedge rst)begin
         bfin <= 1'b0;
 
         sendout <= 1'b0;
+        send_end_ptr <= 0;
+
+        frame_end_fifo_head <= 0;
+        frame_end_fifo_tail <= 0;
+        frame_end_fifo_count <= 0;
 
         crc <= 32'hFFFFFFFF;
     end else begin
@@ -1125,13 +1153,25 @@ always_ff@(posedge clk or negedge rst)begin
         brdy <= 1'b0;
         bfin <= 1'b0;
 
+        case ({frame_end_fifo_push, frame_end_fifo_pop})
+            2'b10: frame_end_fifo_count <= frame_end_fifo_count + 3'd1;
+            2'b01: frame_end_fifo_count <= frame_end_fifo_count - 3'd1;
+            default: frame_end_fifo_count <= frame_end_fifo_count;
+        endcase
+
+        if(frame_end_fifo_pop)begin
+            send_end_ptr <= frame_end_fifo[frame_end_fifo_tail];
+            frame_end_fifo_tail <= frame_end_fifo_tail + 2'd1;
+            sendout <= 1'b1;
+        end
 
 
         if(sendout)begin
             brdy <= 1'b1;
-            if(begin_ptr == end_ptr)begin
+            if(begin_ptr == send_end_ptr)begin
                 sendout <= 1'b0;
                 bfin <= 1'b1;
+                begin_ptr <= (begin_ptr + 16'd1)%16'd2048;
             end else begin
                 begin_ptr <= begin_ptr + 16'd1;
                 if(begin_ptr == 2047)begin_ptr<=0;
@@ -1140,13 +1180,15 @@ always_ff@(posedge clk or negedge rst)begin
 
 
         if(stp)begin
-            if(crc == 32'hC704DD7B)begin
-                //start output the data
-                sendout <= 1'b1;
-                end_ptr <= (end_ptr + 16'd2043)%16'd2048;
+            if(frame_end_fifo_push)begin
+                // Store the inclusive end of the payload and reclaim the FCS.
+                frame_end_fifo[frame_end_fifo_head] <= (end_ptr + 16'd2043)%16'd2048;
+                frame_end_fifo_head <= frame_end_fifo_head + 2'd1;
+                end_ptr <= (end_ptr + 16'd2044)%16'd2048;
+                frame_start_ptr <= (end_ptr + 16'd2044)%16'd2048;
             end else begin
-                //drop the data
-                begin_ptr <= end_ptr;
+                // Drop only the current frame; older validated frames remain.
+                end_ptr <= frame_start_ptr;
             end
             crc <= 32'hFFFFFFFF;
         end else begin

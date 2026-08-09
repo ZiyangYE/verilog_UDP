@@ -243,11 +243,13 @@ def arp_resolve_check() -> CheckResult:
     run_cmd(["ip", "neigh", "del", DUT_IP, "dev", TAP_NAME])
 
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    reply_sink = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     deadline = time.monotonic() + 8.0
     next_probe = 0.0
     probe_count = 0
     last_send_error = ""
     try:
+        reply_sink.bind((HOST_IP, BASE_SRC_PORT + 101))
         probe.bind((HOST_IP, BASE_SRC_PORT + 100))
         while time.monotonic() < deadline:
             now = time.monotonic()
@@ -264,10 +266,18 @@ def arp_resolve_check() -> CheckResult:
             line = p.stdout.strip().lower()
             if "lladdr" in line and "incomplete" not in line and "failed" not in line:
                 if DUT_MAC in line:
+                    reply_sink.settimeout(0.1)
+                    try:
+                        while True:
+                            reply_sink.recvfrom(2048)
+                            reply_sink.settimeout(0.02)
+                    except socket.timeout:
+                        pass
                     return CheckResult("arp.resolve", True, line)
                 return CheckResult("arp.resolve", False, f"resolved but mac mismatch: {line}")
             time.sleep(0.1)
     finally:
+        reply_sink.close()
         probe.close()
 
     detail = f"arp entry did not resolve after {probe_count} probes"
